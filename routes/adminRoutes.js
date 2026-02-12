@@ -23,13 +23,21 @@ router.put('/resources/:id/reject', adminController.rejectResource);
 router.delete('/resources/:id', adminController.deleteResource);
 
 // ============================================
-// USER MANAGEMENT - UPDATED WITH FULL CRUD
+// USER MANAGEMENT - FULL CRUD
 // ============================================
 router.get('/users', adminController.getAllUsers);
-router.get('/users/:id', adminController.getUserById);              // ✅ NEW: Get single user
-router.put('/users/:id', adminController.editUser);                 // ✅ NEW: Edit user
-router.delete('/users/:id', adminController.deleteUser);            // Existing delete
-router.put('/users/:id/reset-password', adminController.resetUserPassword); // ✅ NEW: Reset password
-router.put('/users/:id/toggle-status', adminController.toggleUserStatus);   // ✅ NEW: Toggle status
+router.get('/users/:id', adminController.getUserById);
+router.put('/users/:id', adminController.editUser);
+router.delete('/users/:id', adminController.deleteUser);
+router.put('/users/:id/reset-password', adminController.resetUserPassword);
+router.put('/users/:id/toggle-status', adminController.toggleUserStatus);
+
+// ============================================
+// CONTACT MESSAGES MANAGEMENT - ✅ NEW
+// ============================================
+router.get('/contact-messages', adminController.getContactMessages);
+router.get('/contact-messages/:id', adminController.getContactMessageById);
+router.put('/contact-messages/:id/status', adminController.updateContactMessageStatus);
+router.delete('/contact-messages/:id', adminController.deleteContactMessage);
 
 module.exports = router;

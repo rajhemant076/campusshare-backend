@@ -532,6 +532,134 @@ exports.deleteUser = async (req, res) => {
     });
   }
 };
+// ============================================
+// CONTACT MESSAGES MANAGEMENT
+// ============================================
+
+// @desc    Get all contact messages
+// @route   GET /api/admin/contact-messages
+// @access  Private/Admin
+exports.getContactMessages = async (req, res) => {
+  try {
+    // You'll need to create a Contact model first
+    // For now, we'll read from a simple in-memory store or return empty array
+    // This assumes you have a Contact model
+    
+    const Contact = require("../models/Contact");
+    const messages = await Contact.find().sort({ createdAt: -1 });
+    
+    res.json({
+      success: true,
+      count: messages.length,
+      messages
+    });
+  } catch (error) {
+    console.error('Get contact messages error:', error);
+    res.status(500).json({
+      success: false,
+      message: "Server error fetching contact messages",
+      error: error.message
+    });
+  }
+};
+
+// @desc    Get single contact message
+// @route   GET /api/admin/contact-messages/:id
+// @access  Private/Admin
+exports.getContactMessageById = async (req, res) => {
+  try {
+    const Contact = require("../models/Contact");
+    const message = await Contact.findById(req.params.id);
+    
+    if (!message) {
+      return res.status(404).json({
+        success: false,
+        message: "Message not found"
+      });
+    }
+    
+    res.json({
+      success: true,
+      message
+    });
+  } catch (error) {
+    console.error('Get contact message error:', error);
+    res.status(500).json({
+      success: false,
+      message: "Server error fetching message",
+      error: error.message
+    });
+  }
+};
+
+// @desc    Update contact message status
+// @route   PUT /api/admin/contact-messages/:id/status
+// @access  Private/Admin
+exports.updateContactMessageStatus = async (req, res) => {
+  try {
+    const { status, notes } = req.body;
+    const Contact = require("../models/Contact");
+    
+    const message = await Contact.findById(req.params.id);
+    
+    if (!message) {
+      return res.status(404).json({
+        success: false,
+        message: "Message not found"
+      });
+    }
+    
+    message.status = status || message.status;
+    if (notes !== undefined) message.adminNotes = notes;
+    message.updatedAt = Date.now();
+    
+    await message.save();
+    
+    res.json({
+      success: true,
+      message: "Message status updated",
+      data: message
+    });
+  } catch (error) {
+    console.error('Update message status error:', error);
+    res.status(500).json({
+      success: false,
+      message: "Server error updating message",
+      error: error.message
+    });
+  }
+};
+
+// @desc    Delete contact message
+// @route   DELETE /api/admin/contact-messages/:id
+// @access  Private/Admin
+exports.deleteContactMessage = async (req, res) => {
+  try {
+    const Contact = require("../models/Contact");
+    const message = await Contact.findById(req.params.id);
+    
+    if (!message) {
+      return res.status(404).json({
+        success: false,
+        message: "Message not found"
+      });
+    }
+    
+    await Contact.findByIdAndDelete(req.params.id);
+    
+    res.json({
+      success: true,
+      message: "Message deleted successfully"
+    });
+  } catch (error) {
+    console.error('Delete message error:', error);
+    res.status(500).json({
+      success: false,
+      message: "Server error deleting message",
+      error: error.message
+    });
+  }
+};
 
 // ✅ NEW: Reset user password (admin)
 // @route   PUT /api/admin/users/:id/reset-password

@@ -1,4 +1,5 @@
 const nodemailer = require("nodemailer");
+const Contact = require("../models/Contact"); // Add this import
 
 // @desc    Submit contact form
 // @route   POST /api/contact
@@ -24,64 +25,28 @@ exports.submitContactForm = async (req, res) => {
       });
     }
 
-    // Log contact form submission (for development)
-    console.log("\n📧 CONTACT FORM SUBMISSION:");
+    // ✅ SAVE TO DATABASE
+    const contactMessage = await Contact.create({
+      name,
+      email,
+      subject,
+      message,
+      category: category || 'general',
+      status: 'unread'
+    });
+
+    console.log("\n📧 CONTACT FORM SUBMISSION SAVED:");
+    console.log(`   ID: ${contactMessage._id}`);
     console.log(`   From: ${name} <${email}>`);
     console.log(`   Category: ${category || "General"}`);
     console.log(`   Subject: ${subject}`);
-    console.log(`   Message: ${message}`);
+    console.log(`   Status: unread`);
     console.log("---\n");
-
-    // TODO: In production, integrate with email service
-    // Example with Nodemailer (uncomment and configure):
-    
-    // const transporter = nodemailer.createTransport({
-    //   service: 'gmail',
-    //   auth: {
-    //     user: process.env.EMAIL_USER,
-    //     pass: process.env.EMAIL_PASS
-    //   }
-    // });
-    //
-    // const mailOptions = {
-    //   from: `"CampusShare Contact" <${process.env.EMAIL_USER}>`,
-    //   to: "support@campusshare.com",
-    //   replyTo: email,
-    //   subject: `[Contact Form] ${subject}`,
-    //   html: `
-    //     <h3>New Contact Form Submission</h3>
-    //     <p><strong>Name:</strong> ${name}</p>
-    //     <p><strong>Email:</strong> ${email}</p>
-    //     <p><strong>Category:</strong> ${category || "General"}</p>
-    //     <p><strong>Subject:</strong> ${subject}</p>
-    //     <p><strong>Message:</strong></p>
-    //     <p>${message.replace(/\n/g, '<br>')}</p>
-    //   `
-    // };
-    //
-    // await transporter.sendMail(mailOptions);
-
-    // Send auto-reply to user
-    // const autoReplyOptions = {
-    //   from: `"CampusShare Support" <${process.env.EMAIL_USER}>`,
-    //   to: email,
-    //   subject: "We received your message - CampusShare",
-    //   html: `
-    //     <h3>Hello ${name},</h3>
-    //     <p>Thank you for contacting CampusShare. We have received your message and will get back to you within 24-48 hours.</p>
-    //     <p><strong>Your message:</strong></p>
-    //     <p>${message.replace(/\n/g, '<br>')}</p>
-    //     <br>
-    //     <p>Best regards,</p>
-    //     <p><strong>CampusShare Team</strong></p>
-    //   `
-    // };
-    //
-    // await transporter.sendMail(autoReplyOptions);
 
     res.status(200).json({
       success: true,
       message: "Message sent successfully! We'll get back to you within 24-48 hours.",
+      messageId: contactMessage._id
     });
 
   } catch (error) {
