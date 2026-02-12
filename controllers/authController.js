@@ -162,6 +162,185 @@ exports.getProfile = async (req, res) => {
   }
 };
 
+// ============================================
+// ✅ NEW: UPDATE USER PROFILE
+// ============================================
+// @desc    Update user profile
+// @route   PUT /api/auth/profile
+// @access  Private
+exports.updateProfile = async (req, res) => {
+  try {
+    const { name, branch, semester } = req.body;
+    const userId = req.user._id;
+
+    // Validate at least one field is provided
+    if (!name && !branch && !semester) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide at least one field to update'
+      });
+    }
+
+    // Build update object (only include fields that are provided)
+    const updateData = {};
+    if (name) {
+      if (name.trim().length < 2) {
+        return res.status(400).json({
+          success: false,
+          message: 'Name must be at least 2 characters long'
+        });
+      }
+      updateData.name = name.trim();
+    }
+    
+    if (branch) {
+      const validBranches = ['CSE', 'ECE', 'EEE', 'MECH', 'CIVIL', 'IT', 'OTHER'];
+      if (!validBranches.includes(branch)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid branch selection'
+        });
+      }
+      updateData.branch = branch;
+    }
+    
+    if (semester) {
+      const semNum = Number(semester);
+      if (isNaN(semNum) || semNum < 1 || semNum > 8) {
+        return res.status(400).json({
+          success: false,
+          message: 'Semester must be between 1 and 8'
+        });
+      }
+      updateData.semester = semNum;
+    }
+
+    // Update user
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      updateData,
+      { 
+        new: true, // Return updated document
+        runValidators: true // Run schema validations
+      }
+    ).select('-password'); // Exclude password from response
+
+    if (!updatedUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'Profile updated successfully',
+      user: {
+        id: updatedUser._id,
+        name: updatedUser.name,
+        email: updatedUser.email,
+        branch: updatedUser.branch,
+        semester: updatedUser.semester,
+        role: updatedUser.role,
+        bookmarks: updatedUser.bookmarks,
+        likedResources: updatedUser.likedResources
+      }
+    });
+  } catch (error) {
+    console.error('Update profile error:', error);
+    
+    // Handle duplicate key error (shouldn't happen for profile update, but just in case)
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email already in use'
+      });
+    }
+
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: messages
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'Server error updating profile',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+};
+
+// ============================================
+// ✅ NEW: CHANGE PASSWORD (Optional - Add if you want)
+// ============================================
+// @desc    Change user password
+// @route   PUT /api/auth/change-password
+// @access  Private
+exports.changePassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user._id;
+
+    // Validate input
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide current password and new password'
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'New password must be at least 6 characters long'
+      });
+    }
+
+    // Find user with password
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Verify current password
+    const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: 'Current password is incorrect'
+      });
+    }
+
+    // Hash new password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    // Update password
+    user.password = hashedPassword;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: 'Password changed successfully'
+    });
+  } catch (error) {
+    console.error('Change password error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error changing password',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+};
+
 // @desc    Logout user (client-side token removal)
 // @route   POST /api/auth/logout
 // @access  Private
