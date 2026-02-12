@@ -11,14 +11,17 @@ const generateToken = (user) => {
   );
 };
 
-// @desc    Register new user
+// @desc    Register new user (UPDATED with new fields)
 // @route   POST /api/auth/signup
 // @access  Public
 exports.signup = async (req, res) => {
   try {
-    const { name, email, password, branch, semester } = req.body;
+    const { 
+      name, email, password, branch, semester,
+      phone, enrollmentId, graduationYear, college, bio 
+    } = req.body;
 
-    // Validate input
+    // Validate required fields
     if (!name || !email || !password || !branch || !semester) {
       return res.status(400).json({
         success: false,
@@ -35,18 +38,43 @@ exports.signup = async (req, res) => {
       });
     }
 
+    // Check if enrollment ID is already taken (if provided)
+    if (enrollmentId) {
+      const existingEnrollment = await User.findOne({ enrollmentId });
+      if (existingEnrollment) {
+        return res.status(400).json({
+          success: false,
+          message: 'Enrollment ID already exists'
+        });
+      }
+    }
+
     // Hash password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Create user
+    // Create user with all fields
     const user = await User.create({
       name,
       email,
       password: hashedPassword,
       branch,
       semester: Number(semester),
-      role: 'student'
+      role: 'student',
+      // Optional fields
+      phone: phone || '',
+      enrollmentId: enrollmentId || undefined,
+      graduationYear: graduationYear ? Number(graduationYear) : null,
+      college: college || '',
+      bio: bio || '',
+      socialLinks: {
+        linkedin: '',
+        github: '',
+        twitter: ''
+      },
+      profileVisibility: 'public',
+      lastActive: Date.now(),
+      accountStatus: 'active'
     });
 
     // Generate token
@@ -60,19 +88,38 @@ exports.signup = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
+        phone: user.phone,
+        enrollmentId: user.enrollmentId,
+        graduationYear: user.graduationYear,
+        college: user.college,
+        bio: user.bio,
+        socialLinks: user.socialLinks,
+        profileVisibility: user.profileVisibility,
         branch: user.branch,
         semester: user.semester,
         role: user.role,
         bookmarks: user.bookmarks,
-        likedResources: user.likedResources
+        likedResources: user.likedResources,
+        lastActive: user.lastActive,
+        accountStatus: user.accountStatus,
+        createdAt: user.createdAt
       }
     });
   } catch (error) {
     console.error('Signup error:', error);
+    
+    // Handle duplicate key error for enrollment ID
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'Enrollment ID already exists'
+      });
+    }
+
     res.status(500).json({
       success: false,
       message: 'Server error during registration',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 };
@@ -101,6 +148,14 @@ exports.login = async (req, res) => {
       });
     }
 
+    // Check if account is active
+    if (user.accountStatus !== 'active') {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account has been suspended. Please contact admin.'
+      });
+    }
+
     // Check password
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
@@ -109,6 +164,10 @@ exports.login = async (req, res) => {
         message: 'Invalid credentials'
       });
     }
+
+    // Update last active
+    user.lastActive = Date.now();
+    await user.save();
 
     // Generate token
     const token = generateToken(user);
@@ -121,11 +180,21 @@ exports.login = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
+        phone: user.phone,
+        enrollmentId: user.enrollmentId,
+        graduationYear: user.graduationYear,
+        college: user.college,
+        bio: user.bio,
+        socialLinks: user.socialLinks,
+        profileVisibility: user.profileVisibility,
         branch: user.branch,
         semester: user.semester,
         role: user.role,
         bookmarks: user.bookmarks,
-        likedResources: user.likedResources
+        likedResources: user.likedResources,
+        lastActive: user.lastActive,
+        accountStatus: user.accountStatus,
+        createdAt: user.createdAt
       }
     });
   } catch (error) {
@@ -133,7 +202,7 @@ exports.login = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Server error during login',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 };
@@ -148,33 +217,61 @@ exports.getProfile = async (req, res) => {
       .populate('bookmarks')
       .populate('likedResources');
 
+    // Update last active
+    user.lastActive = Date.now();
+    await user.save();
+
     res.json({
       success: true,
-      user
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        phone: user.phone,
+        enrollmentId: user.enrollmentId,
+        graduationYear: user.graduationYear,
+        college: user.college,
+        bio: user.bio,
+        socialLinks: user.socialLinks,
+        profileVisibility: user.profileVisibility,
+        branch: user.branch,
+        semester: user.semester,
+        role: user.role,
+        bookmarks: user.bookmarks,
+        likedResources: user.likedResources,
+        lastActive: user.lastActive,
+        accountStatus: user.accountStatus,
+        createdAt: user.createdAt
+      }
     });
   } catch (error) {
     console.error('Get profile error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error fetching profile',
-      error: error.message
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 };
 
 // ============================================
-// ✅ NEW: UPDATE USER PROFILE
+// ✅ UPDATED: UPDATE USER PROFILE - ALL FIELDS
 // ============================================
-// @desc    Update user profile
+// @desc    Update user profile (complete)
 // @route   PUT /api/auth/profile
 // @access  Private
 exports.updateProfile = async (req, res) => {
   try {
-    const { name, branch, semester } = req.body;
+    const { 
+      name, branch, semester, phone, enrollmentId, 
+      graduationYear, college, bio, socialLinks, profileVisibility 
+    } = req.body;
+    
     const userId = req.user._id;
 
     // Validate at least one field is provided
-    if (!name && !branch && !semester) {
+    if (!name && !branch && !semester && !phone && !enrollmentId && 
+        !graduationYear && !college && !bio && !socialLinks && !profileVisibility) {
       return res.status(400).json({
         success: false,
         message: 'Please provide at least one field to update'
@@ -183,6 +280,8 @@ exports.updateProfile = async (req, res) => {
 
     // Build update object (only include fields that are provided)
     const updateData = {};
+
+    // Basic info
     if (name) {
       if (name.trim().length < 2) {
         return res.status(400).json({
@@ -215,15 +314,98 @@ exports.updateProfile = async (req, res) => {
       updateData.semester = semNum;
     }
 
+    // 📱 Phone number
+    if (phone !== undefined) {
+      // Basic phone validation (can be enhanced)
+      const phoneRegex = /^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/;
+      if (phone && !phoneRegex.test(phone)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Please provide a valid phone number'
+        });
+      }
+      updateData.phone = phone.trim();
+    }
+
+    // 🆔 Enrollment ID
+    if (enrollmentId !== undefined) {
+      // Check if enrollment ID is already taken by another user
+      if (enrollmentId) {
+        const existingEnrollment = await User.findOne({ 
+          enrollmentId, 
+          _id: { $ne: userId } 
+        });
+        if (existingEnrollment) {
+          return res.status(400).json({
+            success: false,
+            message: 'Enrollment ID already exists'
+          });
+        }
+      }
+      updateData.enrollmentId = enrollmentId || undefined;
+    }
+
+    // 🎓 Graduation Year
+    if (graduationYear !== undefined) {
+      const year = graduationYear ? Number(graduationYear) : null;
+      if (year && (year < 2000 || year > 2030)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Graduation year must be between 2000 and 2030'
+        });
+      }
+      updateData.graduationYear = year;
+    }
+
+    // 🏫 College
+    if (college !== undefined) {
+      updateData.college = college.trim();
+    }
+
+    // 📝 Bio
+    if (bio !== undefined) {
+      if (bio.length > 500) {
+        return res.status(400).json({
+          success: false,
+          message: 'Bio cannot exceed 500 characters'
+        });
+      }
+      updateData.bio = bio.trim();
+    }
+
+    // 🌐 Social Links
+    if (socialLinks) {
+      updateData.socialLinks = {
+        linkedin: socialLinks.linkedin?.trim() || '',
+        github: socialLinks.github?.trim() || '',
+        twitter: socialLinks.twitter?.trim() || ''
+      };
+    }
+
+    // 👥 Profile Visibility
+    if (profileVisibility) {
+      const validVisibility = ['public', 'private', 'contacts'];
+      if (!validVisibility.includes(profileVisibility)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid profile visibility setting'
+        });
+      }
+      updateData.profileVisibility = profileVisibility;
+    }
+
+    // Update last active timestamp
+    updateData.lastActive = Date.now();
+
     // Update user
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       updateData,
       { 
-        new: true, // Return updated document
-        runValidators: true // Run schema validations
+        new: true,
+        runValidators: true
       }
-    ).select('-password'); // Exclude password from response
+    ).select('-password');
 
     if (!updatedUser) {
       return res.status(404).json({
@@ -239,21 +421,31 @@ exports.updateProfile = async (req, res) => {
         id: updatedUser._id,
         name: updatedUser.name,
         email: updatedUser.email,
+        phone: updatedUser.phone,
+        enrollmentId: updatedUser.enrollmentId,
+        graduationYear: updatedUser.graduationYear,
+        college: updatedUser.college,
+        bio: updatedUser.bio,
+        socialLinks: updatedUser.socialLinks,
+        profileVisibility: updatedUser.profileVisibility,
         branch: updatedUser.branch,
         semester: updatedUser.semester,
         role: updatedUser.role,
         bookmarks: updatedUser.bookmarks,
-        likedResources: updatedUser.likedResources
+        likedResources: updatedUser.likedResources,
+        lastActive: updatedUser.lastActive,
+        accountStatus: updatedUser.accountStatus,
+        createdAt: updatedUser.createdAt
       }
     });
   } catch (error) {
     console.error('Update profile error:', error);
     
-    // Handle duplicate key error (shouldn't happen for profile update, but just in case)
+    // Handle duplicate key error for enrollment ID
     if (error.code === 11000) {
       return res.status(400).json({
         success: false,
-        message: 'Email already in use'
+        message: 'Enrollment ID already exists'
       });
     }
 
@@ -276,7 +468,7 @@ exports.updateProfile = async (req, res) => {
 };
 
 // ============================================
-// ✅ NEW: CHANGE PASSWORD (Optional - Add if you want)
+// ✅ CHANGE PASSWORD
 // ============================================
 // @desc    Change user password
 // @route   PUT /api/auth/change-password
@@ -325,6 +517,7 @@ exports.changePassword = async (req, res) => {
 
     // Update password
     user.password = hashedPassword;
+    user.lastActive = Date.now();
     await user.save();
 
     res.json({
@@ -336,6 +529,63 @@ exports.changePassword = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Server error changing password',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+};
+
+// ============================================
+// ✅ GET USER BY ID (Public Profile)
+// ============================================
+// @desc    Get public user profile by ID
+// @route   GET /api/auth/user/:id
+// @access  Public (with privacy restrictions)
+exports.getPublicProfile = async (req, res) => {
+  try {
+    const userId = req.params.id;
+    
+    const user = await User.findById(userId)
+      .select('-password -bookmarks -likedResources -email -phone -enrollmentId');
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Check privacy settings
+    if (user.profileVisibility === 'private') {
+      // If requesting user is not the owner and not admin
+      if (!req.user || (req.user._id.toString() !== userId && req.user.role !== 'admin')) {
+        return res.status(403).json({
+          success: false,
+          message: 'This profile is private'
+        });
+      }
+    }
+
+    res.json({
+      success: true,
+      user: {
+        id: user._id,
+        name: user.name,
+        branch: user.branch,
+        semester: user.semester,
+        college: user.college,
+        bio: user.bio,
+        graduationYear: user.graduationYear,
+        socialLinks: user.profileVisibility === 'public' ? user.socialLinks : undefined,
+        role: user.role,
+        lastActive: user.lastActive,
+        createdAt: user.createdAt
+      }
+    });
+  } catch (error) {
+    console.error('Get public profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error fetching profile',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
