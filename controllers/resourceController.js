@@ -23,9 +23,22 @@ exports.uploadResource = async (req, res) => {
       });
     }
 
-    // GridFS file details
-    const fileId = req.file.id;
+    // ✅ FIXED: GridFS file details for direct upload approach
+    const fileId = req.file.id || req.file.gfsId;  // Handle both naming conventions
+    if (!fileId) {
+      return res.status(500).json({
+        success: false,
+        message: "File upload failed - no file ID generated",
+      });
+    }
+
     const fileUrl = `/api/files/${fileId}`;
+    
+    // ✅ FIXED: Get filename from multiple possible sources
+    const fileName = req.file.originalname || 
+                    (req.file.metadata && req.file.metadata.originalName) || 
+                    req.file.filename || 
+                    "document.pdf";
 
     // Create resource
     const resource = await Resource.create({
@@ -39,11 +52,13 @@ exports.uploadResource = async (req, res) => {
       // ✅ GridFS fields
       fileId: fileId.toString(),
       fileUrl: fileUrl,
-      fileName: req.file.metadata?.originalName || req.file.filename,
+      fileName: fileName,
 
       uploadedBy: req.user._id,
       status: "pending",
     });
+
+    console.log(`✅ Resource created: ${resource._id} with file: ${fileId}`);
 
     res.status(201).json({
       success: true,
@@ -56,7 +71,7 @@ exports.uploadResource = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Server error during upload",
-      error: error.message,
+      error: process.env.NODE_ENV === "development" ? error.message : "Internal server error",
     });
   }
 };
