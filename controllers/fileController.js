@@ -9,7 +9,7 @@ mongoose.connection.once("open", () => {
   console.log("✅ GridFS Bucket Initialized");
 });
 
-// VIEW / DOWNLOAD FILE
+// VIEW / DOWNLOAD FILE - FIXED VERSION
 exports.getFile = async (req, res) => {
   try {
     if (!gfsBucket) {
@@ -19,7 +19,7 @@ exports.getFile = async (req, res) => {
       });
     }
 
-    // ✅ FIXED: Better ObjectId validation
+    // ✅ Better ObjectId validation
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ 
         success: false, 
@@ -29,6 +29,7 @@ exports.getFile = async (req, res) => {
 
     const fileId = new mongoose.Types.ObjectId(req.params.id);
 
+    // Get file metadata
     const files = await mongoose.connection.db
       .collection("uploads.files")
       .find({ _id: fileId })
@@ -43,10 +44,14 @@ exports.getFile = async (req, res) => {
 
     const file = files[0];
 
-    // Set headers
-    res.set("Content-Type", file.contentType || "application/pdf");
-    res.set("Content-Disposition", `inline; filename="${encodeURIComponent(file.filename)}"`);
-    res.set("Cache-Control", "public, max-age=3600");
+    // 🔥 FIXED: Proper headers for PDF viewing
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': 'inline',  // 'inline' for viewing, 'attachment' for download
+      'Content-Length': file.length,
+      'Accept-Ranges': 'bytes',
+      'Cache-Control': 'public, max-age=3600'
+    });
 
     const downloadStream = gfsBucket.openDownloadStream(fileId);
     
@@ -61,6 +66,7 @@ exports.getFile = async (req, res) => {
       }
     });
 
+    // Pipe the file to response
     downloadStream.pipe(res);
 
   } catch (err) {
@@ -92,7 +98,6 @@ exports.deleteFile = async (req, res) => {
 
     const fileId = new mongoose.Types.ObjectId(req.params.id);
 
-    // Check if file exists before deleting
     const files = await mongoose.connection.db
       .collection("uploads.files")
       .find({ _id: fileId })
