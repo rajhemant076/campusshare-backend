@@ -310,6 +310,31 @@ exports.getBookmarks = async (req, res) => {
     });
   }
 };
+// Add this function to your resourceController.js
+// @desc    Delete resource by ID (used by admin)
+// @access  Internal
+exports.deleteResourceById = async (resourceId) => {
+  try {
+    const resource = await Resource.findById(resourceId);
+    if (!resource) return false;
+
+    // Delete from GridFS
+    if (resource.fileId) {
+      const db = mongoose.connection.db;
+      const bucket = new mongoose.mongo.GridFSBucket(db, {
+        bucketName: "uploads"
+      });
+      const fileId = new mongoose.Types.ObjectId(resource.fileId);
+      await bucket.delete(fileId);
+    }
+
+    await Resource.findByIdAndDelete(resourceId);
+    return true;
+  } catch (error) {
+    console.error('Error deleting resource:', error);
+    return false;
+  }
+};
 
 // @desc    Get user's uploaded resources
 // @route   GET /api/resources/my-uploads

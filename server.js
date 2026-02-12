@@ -1,9 +1,7 @@
 const mongoose = require('mongoose');
-// const fs = require('fs');
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const path = require("path");
 const connectDB = require("./config/db");
 
 // ============================================
@@ -33,9 +31,10 @@ connectDB();
 const authRoutes = require("./routes/authRoutes");
 const resourceRoutes = require("./routes/resourceRoutes");
 const adminRoutes = require("./routes/adminRoutes");
-
-// ✅ NEW: GridFS File Routes
 const fileRoutes = require("./routes/fileRoutes");
+const featuresRoutes = require("./routes/featuresRoutes"); // ✅ NEW: Features routes
+const contactRoutes = require("./routes/contactRoutes");   // ✅ NEW: Contact routes
+const aboutRoutes = require("./routes/aboutRoutes");       // ✅ NEW: About routes
 
 const app = express();
 
@@ -90,39 +89,15 @@ app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // ============================================
-// STATIC FILES CONFIGURATION
-// ============================================
-// Ensure uploads directory exists
-const fs = require('fs');
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-  console.log('📁 Created uploads directory');
-}
-
-// Serve static files with proper headers
-app.use('/uploads', express.static(uploadDir, {
-  setHeaders: (res, filePath) => {
-    // Set proper content type for PDFs
-    if (filePath.endsWith('.pdf')) {
-      res.setHeader('Content-Type', 'application/pdf');
-    }
-    // Allow cross-origin requests for files
-    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
-}));
-
-// ============================================
 // API ROUTES
 // ============================================
 app.use("/api/auth", authRoutes);
 app.use("/api/resources", resourceRoutes);
 app.use("/api/admin", adminRoutes);
-
-// ✅ NEW: GridFS route for view/download PDF files
-// Example: GET /api/files/<fileId>
 app.use("/api/files", fileRoutes);
+app.use("/api/features", featuresRoutes); // ✅ NEW: Features routes
+app.use("/api/contact", contactRoutes);   // ✅ NEW: Contact routes
+app.use("/api/about", aboutRoutes);       // ✅ NEW: About routes
 
 // ============================================
 // HEALTH CHECK ENDPOINT
@@ -141,7 +116,7 @@ app.get("/api/health", (req, res) => {
 });
 
 // ============================================
-// ROOT ENDPOINT
+// ROOT ENDPOINT - UPDATED WITH NEW ROUTES
 // ============================================
 app.get("/", (req, res) => {
   res.status(200).json({
@@ -152,7 +127,10 @@ app.get("/", (req, res) => {
       auth: "/api/auth",
       resources: "/api/resources",
       admin: "/api/admin",
-      files: "/api/files/:id"
+      files: "/api/files/:id",
+      features: "/api/features", // ✅ NEW
+      contact: "/api/contact",   // ✅ NEW
+      about: "/api/about"        // ✅ NEW
     },
     version: "1.0.0"
   });
@@ -255,7 +233,7 @@ app.use((err, req, res, next) => {
 });
 
 // ============================================
-// 404 HANDLER - MUST BE LAST
+// 404 HANDLER - MUST BE LAST - UPDATED WITH NEW ROUTES
 // ============================================
 app.use((req, res) => {
   res.status(404).json({
@@ -266,7 +244,10 @@ app.use((req, res) => {
       auth: 'POST /api/auth/signup, POST /api/auth/login, GET /api/auth/me',
       resources: 'GET /api/resources, POST /api/resources/upload',
       files: 'GET /api/files/:id',
-      admin: 'GET /api/admin/stats, GET /api/admin/resources/pending'
+      admin: 'GET /api/admin/stats, GET /api/admin/resources/pending',
+      features: 'GET /api/features, GET /api/features/stats',     // ✅ NEW
+      contact: 'POST /api/contact, GET /api/contact/info',        // ✅ NEW
+      about: 'GET /api/about, GET /api/about/team'                // ✅ NEW
     }
   });
 });
@@ -283,7 +264,6 @@ const server = app.listen(PORT, () => {
   console.log(`📍 Local URL: http://localhost:${PORT}`);
   console.log(`📍 API URL: http://localhost:${PORT}/api`);
   console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📁 Uploads directory: ${uploadDir}`);
 
   // Show allowed CORS origins
   console.log('\n🔒 CORS Allowed Origins:');
@@ -297,6 +277,9 @@ const server = app.listen(PORT, () => {
   console.log('   POST /api/resources/upload - Upload file');
   console.log('   GET  /api/files/:id - View/Download PDF (GridFS)');
   console.log('   GET  /api/admin/*   - Admin routes');
+  console.log('   GET  /api/features  - Features & stats');      // ✅ NEW
+  console.log('   POST /api/contact   - Contact form');          // ✅ NEW
+  console.log('   GET  /api/about     - About information');     // ✅ NEW
   console.log('\n✅ Server ready!');
   console.log('=================================\n');
 });

@@ -1,8 +1,10 @@
 const Resource = require("../models/Resource");
 const User = require("../models/User");
-const fs = require("fs");
-const path = require("path");
+const mongoose = require("mongoose");
 
+// ============================================
+// DASHBOARD STATS
+// ============================================
 // @desc    Get admin dashboard stats
 // @route   GET /api/admin/stats
 // @access  Private/Admin
@@ -34,6 +36,9 @@ exports.getDashboardStats = async (req, res) => {
   }
 };
 
+// ============================================
+// RESOURCE MANAGEMENT
+// ============================================
 // @desc    Get pending resources
 // @route   GET /api/admin/resources/pending
 // @access  Private/Admin
@@ -181,7 +186,7 @@ exports.rejectResource = async (req, res) => {
   }
 };
 
-// @desc    Delete resource (and file)
+// @desc    Delete resource (and file from GridFS)
 // @route   DELETE /api/admin/resources/:id
 // @access  Private/Admin
 exports.deleteResource = async (req, res) => {
@@ -195,14 +200,20 @@ exports.deleteResource = async (req, res) => {
       });
     }
 
-    // Delete file from server
-    if (resource.fileUrl) {
-      const relativePath = resource.fileUrl.replace(/^\//, '');
-      const filePath = path.join(__dirname, "..", relativePath);
-      
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-        console.log(`✅ File deleted: ${filePath}`);
+    // ✅ FIXED: Delete file from GridFS
+    if (resource.fileId) {
+      try {
+        const db = mongoose.connection.db;
+        const bucket = new mongoose.mongo.GridFSBucket(db, {
+          bucketName: "uploads"
+        });
+        
+        const fileId = new mongoose.Types.ObjectId(resource.fileId);
+        await bucket.delete(fileId);
+        console.log(`✅ GridFS file deleted: ${resource.fileId}`);
+      } catch (fileError) {
+        console.error("Error deleting GridFS file:", fileError);
+        // Continue with resource deletion even if file delete fails
       }
     }
 
@@ -221,6 +232,10 @@ exports.deleteResource = async (req, res) => {
     });
   }
 };
+
+// ============================================
+// USER MANAGEMENT - UPDATED WITH EDIT FUNCTIONALITY
+// ============================================
 
 // @desc    Get all users (students only)
 // @route   GET /api/admin/users
@@ -246,7 +261,220 @@ exports.getAllUsers = async (req, res) => {
   }
 };
 
-// @desc    Delete user and all their resources
+// ✅ NEW: Get single user by ID (for editing)
+// @route   GET /api/admin/users/:id
+// @access  Private/Admin
+exports.getUserById = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select("-password");
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Prevent accessing admin users
+    if (user.role === "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Cannot access admin users",
+      });
+    }
+
+    res.json({
+      success: true,
+      user,
+    });
+  } catch (error) {
+    console.error('Get user by ID error:', error);
+    res.status(500).json({
+      success: false,
+      message: "Server error fetching user",
+      error: error.message,
+    });
+  }
+};
+
+// ✅ NEW: Edit user
+// @route   PUT /api/admin/users/:id
+// @access  Private/Admin
+exports.editUser = async (req, res) => {
+  try {
+    const {
+      name,
+      email,
+      branch,
+      semester,
+      phone,
+      enrollmentId,
+      graduationYear,
+      college,
+      bio,
+      accountStatus,
+      role
+    } = req.body;
+
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Prevent editing admin users
+    if (user.role === "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Cannot edit admin users",
+      });
+    }
+
+    // Build update object
+    const updateData = {};
+
+    // Basic info
+    if (name) updateData.name = name.trim();
+    if (email) {
+      // Check if email is already taken by another user
+      const existingEmail = await User.findOne({ 
+        email, 
+        _id: { $ne: user._id } 
+      });
+      if (existingEmail) {
+        return res.status(400).json({
+          success: false,
+          message: "Email already in use by another user",
+        });
+      }
+      updateData.email = email;
+    }
+    
+    if (branch) {
+      const validBranches = ['CSE', 'ECE', 'EEE', 'MECH', 'CIVIL', 'IT', 'OTHER'];
+      if (!validBranches.includes(branch)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid branch selection',
+        });
+      }
+      updateData.branch = branch;
+    }
+
+    if (semester) {
+      const semNum = Number(semester);
+      if (isNaN(semNum) || semNum < 1 || semNum > 8) {
+        return res.status(400).json({
+          success: false,
+          message: 'Semester must be between 1 and 8',
+        });
+      }
+      updateData.semester = semNum;
+    }
+
+    // Contact & Academic
+    if (phone !== undefined) updateData.phone = phone || '';
+    
+    if (enrollmentId !== undefined) {
+      if (enrollmentId) {
+        const existingEnrollment = await User.findOne({ 
+          enrollmentId, 
+          _id: { $ne: user._id } 
+        });
+        if (existingEnrollment) {
+          return res.status(400).json({
+            success: false,
+            message: 'Enrollment ID already exists',
+          });
+        }
+      }
+      updateData.enrollmentId = enrollmentId || undefined;
+    }
+
+    if (graduationYear !== undefined) {
+      const year = graduationYear ? Number(graduationYear) : null;
+      if (year && (year < 2000 || year > 2030)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Graduation year must be between 2000 and 2030',
+        });
+      }
+      updateData.graduationYear = year;
+    }
+
+    if (college !== undefined) updateData.college = college || '';
+    if (bio !== undefined) updateData.bio = bio || '';
+
+    // Account management
+    if (accountStatus) {
+      const validStatus = ['active', 'suspended', 'deactivated'];
+      if (!validStatus.includes(accountStatus)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid account status',
+        });
+      }
+      updateData.accountStatus = accountStatus;
+    }
+
+    // ⚠️ Role change - only if explicitly provided and not admin
+    if (role && role !== user.role) {
+      if (role === 'admin') {
+        return res.status(403).json({
+          success: false,
+          message: 'Cannot promote users to admin',
+        });
+      }
+      updateData.role = role; // Only allow 'student' role
+    }
+
+    // Update user
+    const updatedUser = await User.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    res.json({
+      success: true,
+      message: "User updated successfully",
+      user: updatedUser,
+    });
+
+  } catch (error) {
+    console.error('Edit user error:', error);
+
+    // Handle duplicate key errors
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern)[0];
+      return res.status(400).json({
+        success: false,
+        message: `${field} already exists`,
+      });
+    }
+
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: messages,
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: "Server error updating user",
+      error: error.message,
+    });
+  }
+};
+
+// @desc    Delete user and all their resources (with GridFS cleanup)
 // @route   DELETE /api/admin/users/:id
 // @access  Private/Admin
 exports.deleteUser = async (req, res) => {
@@ -268,16 +496,22 @@ exports.deleteUser = async (req, res) => {
       });
     }
 
-    // Delete all resources uploaded by this user
+    // ✅ FIXED: Delete all resources and their GridFS files
     const userResources = await Resource.find({ uploadedBy: user._id });
 
     for (let resource of userResources) {
-      if (resource.fileUrl) {
-        const relativePath = resource.fileUrl.replace(/^\//, '');
-        const filePath = path.join(__dirname, "..", relativePath);
-        
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
+      if (resource.fileId) {
+        try {
+          const db = mongoose.connection.db;
+          const bucket = new mongoose.mongo.GridFSBucket(db, {
+            bucketName: "uploads"
+          });
+          
+          const fileId = new mongoose.Types.ObjectId(resource.fileId);
+          await bucket.delete(fileId);
+          console.log(`✅ GridFS file deleted: ${resource.fileId}`);
+        } catch (fileError) {
+          console.error("Error deleting GridFS file:", fileError);
         }
       }
     }
@@ -287,13 +521,108 @@ exports.deleteUser = async (req, res) => {
 
     res.json({
       success: true,
-      message: "User deleted successfully",
+      message: "User and all associated resources deleted successfully",
     });
   } catch (error) {
     console.error('Delete user error:', error);
     res.status(500).json({
       success: false,
       message: "Server error deleting user",
+      error: error.message,
+    });
+  }
+};
+
+// ✅ NEW: Reset user password (admin)
+// @route   PUT /api/admin/users/:id/reset-password
+// @access  Private/Admin
+exports.resetUserPassword = async (req, res) => {
+  try {
+    const { newPassword } = req.body;
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Prevent resetting admin passwords
+    if (user.role === "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Cannot reset admin user password",
+      });
+    }
+
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 6 characters long",
+      });
+    }
+
+    // Hash new password
+    const bcrypt = require('bcryptjs');
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+    user.password = hashedPassword;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: "Password reset successfully",
+    });
+
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({
+      success: false,
+      message: "Server error resetting password",
+      error: error.message,
+    });
+  }
+};
+
+// ✅ NEW: Toggle user account status (suspend/activate)
+// @route   PUT /api/admin/users/:id/toggle-status
+// @access  Private/Admin
+exports.toggleUserStatus = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Prevent toggling admin status
+    if (user.role === "admin") {
+      return res.status(403).json({
+        success: false,
+        message: "Cannot modify admin user status",
+      });
+    }
+
+    const newStatus = user.accountStatus === 'active' ? 'suspended' : 'active';
+    user.accountStatus = newStatus;
+    await user.save();
+
+    res.json({
+      success: true,
+      message: `User ${newStatus === 'active' ? 'activated' : 'suspended'} successfully`,
+      accountStatus: newStatus,
+    });
+
+  } catch (error) {
+    console.error('Toggle user status error:', error);
+    res.status(500).json({
+      success: false,
+      message: "Server error toggling user status",
       error: error.message,
     });
   }
