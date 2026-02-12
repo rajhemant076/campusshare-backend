@@ -2,7 +2,9 @@ const express = require("express");
 const router = express.Router();
 const resourceController = require("../controllers/resourceController");
 const authMiddleware = require("../middleware/auth");
-const { upload, handleMulterError } = require("../middleware/upload");
+
+// ✅ GridFS Upload Middleware
+const upload = require("../middleware/gridfsUpload");
 
 // Public routes
 router.get("/", resourceController.getResources);
@@ -16,7 +18,6 @@ router.post(
   "/upload",
   authMiddleware,
   upload.single("file"),
-  handleMulterError,
   resourceController.uploadResource
 );
 

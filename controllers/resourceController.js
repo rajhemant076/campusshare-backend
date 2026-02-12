@@ -1,7 +1,5 @@
 const Resource = require("../models/Resource");
 const User = require("../models/User");
-const fs = require("fs");
-const path = require("path");
 
 // @desc    Upload new resource
 // @route   POST /api/resources/upload
@@ -12,10 +10,6 @@ exports.uploadResource = async (req, res) => {
 
     // Validate required fields
     if (!title || !description || !branch || !semester || !subject || !type) {
-      // Delete uploaded file if validation fails
-      if (req.file) {
-        fs.unlinkSync(req.file.path);
-      }
       return res.status(400).json({
         success: false,
         message: "Please provide all required fields",
@@ -29,6 +23,10 @@ exports.uploadResource = async (req, res) => {
       });
     }
 
+    // GridFS file details
+    const fileId = req.file.id;
+    const fileUrl = `/api/files/${fileId}`;
+
     // Create resource
     const resource = await Resource.create({
       title,
@@ -37,8 +35,12 @@ exports.uploadResource = async (req, res) => {
       semester: Number(semester),
       subject,
       type,
-      fileUrl: `/uploads/${req.file.filename}`,
-      fileName: req.file.originalname,
+
+      // ✅ GridFS fields
+      fileId: fileId.toString(),
+      fileUrl: fileUrl,
+      fileName: req.file.metadata?.originalName || req.file.filename,
+
       uploadedBy: req.user._id,
       status: "pending",
     });
@@ -50,15 +52,6 @@ exports.uploadResource = async (req, res) => {
     });
   } catch (error) {
     console.error("Upload resource error:", error);
-
-    // Delete uploaded file if error occurs
-    if (req.file) {
-      try {
-        fs.unlinkSync(req.file.path);
-      } catch (unlinkError) {
-        console.error("Error deleting file:", unlinkError);
-      }
-    }
 
     res.status(500).json({
       success: false,
@@ -128,8 +121,12 @@ exports.getResourceById = async (req, res) => {
     }
 
     // Only allow access to approved resources or if user is admin/owner
-    if (resource.status !== "approved" && 
-        (!req.user || (req.user._id.toString() !== resource.uploadedBy._id.toString() && req.user.role !== 'admin'))) {
+    if (
+      resource.status !== "approved" &&
+      (!req.user ||
+        (req.user._id.toString() !== resource.uploadedBy._id.toString() &&
+          req.user.role !== "admin"))
+    ) {
       return res.status(403).json({
         success: false,
         message: "Access denied. Resource is not approved.",
@@ -265,11 +262,11 @@ exports.getBookmarks = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).populate({
       path: "bookmarks",
-      populate: { 
-        path: "uploadedBy", 
-        select: "name branch semester" 
+      populate: {
+        path: "uploadedBy",
+        select: "name branch semester",
       },
-      match: { status: "approved" } // Only show approved resources
+      match: { status: "approved" }, // Only show approved resources
     });
 
     if (!user) {
@@ -280,7 +277,9 @@ exports.getBookmarks = async (req, res) => {
     }
 
     // Filter out any null values (deleted resources)
-    const validBookmarks = user.bookmarks.filter(bookmark => bookmark !== null);
+    const validBookmarks = user.bookmarks.filter(
+      (bookmark) => bookmark !== null
+    );
 
     res.json({
       success: true,

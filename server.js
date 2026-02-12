@@ -34,6 +34,9 @@ const authRoutes = require("./routes/authRoutes");
 const resourceRoutes = require("./routes/resourceRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 
+// ✅ NEW: GridFS File Routes
+const fileRoutes = require("./routes/fileRoutes");
+
 const app = express();
 
 // ============================================
@@ -47,7 +50,7 @@ const allowedOrigins = [
   'http://127.0.0.1:5173',
   'http://127.0.0.1:5174',
   'http://127.0.0.1:3000',
-  
+
   // Production origins - ADD YOUR DEPLOYED FRONTEND URLS HERE
   'https://campusshare-frontend.vercel.app',
   'https://campusshare-frontend.netlify.app',
@@ -60,7 +63,7 @@ app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps, curl, Postman)
     if (!origin) return callback(null, true);
-    
+
     // Check if the origin is allowed
     if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV !== 'production') {
       callback(null, true);
@@ -117,6 +120,10 @@ app.use("/api/auth", authRoutes);
 app.use("/api/resources", resourceRoutes);
 app.use("/api/admin", adminRoutes);
 
+// ✅ NEW: GridFS route for view/download PDF files
+// Example: GET /api/files/<fileId>
+app.use("/api/files", fileRoutes);
+
 // ============================================
 // HEALTH CHECK ENDPOINT
 // ============================================
@@ -144,7 +151,8 @@ app.get("/", (req, res) => {
       health: "/api/health",
       auth: "/api/auth",
       resources: "/api/resources",
-      admin: "/api/admin"
+      admin: "/api/admin",
+      files: "/api/files/:id"
     },
     version: "1.0.0"
   });
@@ -257,6 +265,7 @@ app.use((req, res) => {
       health: 'GET /api/health',
       auth: 'POST /api/auth/signup, POST /api/auth/login, GET /api/auth/me',
       resources: 'GET /api/resources, POST /api/resources/upload',
+      files: 'GET /api/files/:id',
       admin: 'GET /api/admin/stats, GET /api/admin/resources/pending'
     }
   });
@@ -275,17 +284,18 @@ const server = app.listen(PORT, () => {
   console.log(`📍 API URL: http://localhost:${PORT}/api`);
   console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`📁 Uploads directory: ${uploadDir}`);
-  
+
   // Show allowed CORS origins
   console.log('\n🔒 CORS Allowed Origins:');
   allowedOrigins.forEach(origin => console.log(`   - ${origin}`));
-  
+
   console.log('\n📋 Available Endpoints:');
   console.log('   GET  /              - API info');
   console.log('   GET  /api/health    - Health check');
   console.log('   POST /api/auth/*    - Authentication');
   console.log('   GET  /api/resources - Get resources');
   console.log('   POST /api/resources/upload - Upload file');
+  console.log('   GET  /api/files/:id - View/Download PDF (GridFS)');
   console.log('   GET  /api/admin/*   - Admin routes');
   console.log('\n✅ Server ready!');
   console.log('=================================\n');

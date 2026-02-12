@@ -2,45 +2,53 @@ const mongoose = require("mongoose");
 
 const resourceSchema = new mongoose.Schema(
   {
-    title: { 
-      type: String, 
-      required: true, 
-      trim: true 
+    title: {
+      type: String,
+      required: true,
+      trim: true,
     },
-    description: { 
-      type: String, 
-      required: true, 
-      trim: true 
+    description: {
+      type: String,
+      required: true,
+      trim: true,
     },
     branch: {
       type: String,
       required: true,
       enum: ["CSE", "ECE", "EEE", "MECH", "CIVIL", "IT", "OTHER"],
     },
-    semester: { 
-      type: Number, 
-      required: true, 
-      min: 1, 
-      max: 8 
+    semester: {
+      type: Number,
+      required: true,
+      min: 1,
+      max: 8,
     },
-    subject: { 
-      type: String, 
-      required: true, 
-      trim: true 
+    subject: {
+      type: String,
+      required: true,
+      trim: true,
     },
     type: {
       type: String,
       required: true,
       enum: ["Notes", "Assignment", "PYQ", "Lab"],
     },
-    fileUrl: { 
-      type: String, 
-      required: true 
+
+    // ✅ GridFS File ID (important)
+    fileId: {
+      type: String,
+      required: true,
     },
-    fileName: { 
-      type: String, 
-      required: true 
+
+    fileUrl: {
+      type: String,
+      required: true,
     },
+    fileName: {
+      type: String,
+      required: true,
+    },
+
     uploadedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
@@ -51,17 +59,17 @@ const resourceSchema = new mongoose.Schema(
       enum: ["pending", "approved", "rejected"],
       default: "pending",
     },
-    rejectionReason: { 
-      type: String, 
-      default: "" 
+    rejectionReason: {
+      type: String,
+      default: "",
     },
-    likesCount: { 
-      type: Number, 
-      default: 0 
+    likesCount: {
+      type: Number,
+      default: 0,
     },
   },
-  { 
-    timestamps: true 
+  {
+    timestamps: true,
   }
 );
 
