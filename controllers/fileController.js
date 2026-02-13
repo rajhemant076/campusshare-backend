@@ -1,3 +1,5 @@
+// controllers/fileController.js
+
 const mongoose = require("mongoose");
 
 // ✅ Get GridFS bucket with error handling
@@ -11,11 +13,10 @@ const getGridFSBucket = () => {
   });
 };
 
-// ✅ VIEW / DOWNLOAD FILE - IMPROVED VERSION
+// ✅ VIEW / DOWNLOAD FILE
 exports.getFile = async (req, res) => {
   try {
     console.log('\n📥 File request received for ID:', req.params.id);
-    console.log('🔌 MongoDB connection state:', mongoose.connection.readyState);
     
     // Check MongoDB connection
     if (mongoose.connection.readyState !== 1) {
@@ -62,7 +63,6 @@ exports.getFile = async (req, res) => {
       size: file.length,
       sizeMB: (file.length / (1024 * 1024)).toFixed(2),
       contentType: file.contentType || 'application/pdf',
-      uploadDate: file.uploadDate
     });
 
     // Set proper headers for PDF viewing
@@ -110,7 +110,7 @@ exports.getFile = async (req, res) => {
   }
 };
 
-// ✅ DELETE FILE - IMPROVED VERSION
+// Rest of your fileController.js remains the same...// ✅ DELETE FILE - IMPROVED VERSION
 exports.deleteFile = async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) {

@@ -192,6 +192,11 @@ exports.rejectResource = async (req, res) => {
 // @desc    Delete resource (and file from GridFS) - FIXED VERSION
 // @route   DELETE /api/admin/resources/:id
 // @access  Private/Admin
+// controllers/adminController.js - deleteResource function
+
+// @desc    Delete resource (and file from GridFS)
+// @route   DELETE /api/admin/resources/:id
+// @access  Private/Admin
 exports.deleteResource = async (req, res) => {
   try {
     const resource = await Resource.findById(req.params.id);
@@ -211,6 +216,7 @@ exports.deleteResource = async (req, res) => {
           bucketName: "uploads"
         });
         
+        // Convert string ID to ObjectId
         const fileId = new mongoose.Types.ObjectId(resource.fileId);
         await bucket.delete(fileId);
         console.log(`✅ GridFS file deleted: ${resource.fileId}`);
@@ -235,6 +241,8 @@ exports.deleteResource = async (req, res) => {
     });
   }
 };
+
+// Also update the deleteUser function similarly
 
 // ============================================
 // USER MANAGEMENT - UPDATED WITH EDIT FUNCTIONALITY

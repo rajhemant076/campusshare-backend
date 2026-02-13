@@ -1,29 +1,36 @@
 const express = require("express");
 const router = express.Router();
-const resourceController = require("../controllers/resourceController");
+const { upload, uploadToGridFS } = require("../middleware/gridfsUploadDirect"); // ✅ Use direct version
 const authMiddleware = require("../middleware/auth");
-
-// ✅ FIXED: Import the direct GridFS upload middleware
-const { upload, uploadToGridFS } = require("../middleware/gridfsUploadDirect");
+const {
+  uploadResource,
+  getResources,
+  getResourceById,
+  toggleLike,
+  toggleBookmark,
+  getBookmarks,
+  getMyUploads,
+} = require("../controllers/resourceController");
 
 // Public routes
-router.get("/", resourceController.getResources);
-router.get("/:id", resourceController.getResourceById);
+router.get("/", getResources);
+router.get("/:id", getResourceById);
 
-// Protected routes (require authentication)
-router.get("/user/bookmarks", authMiddleware, resourceController.getBookmarks);
-router.get("/user/my-uploads", authMiddleware, resourceController.getMyUploads);
+// Protected routes
+router.get("/user/bookmarks", authMiddleware, getBookmarks);
+router.get("/user/my-uploads", authMiddleware, getMyUploads);
 
-// ✅ FIXED: Upload route with proper GridFS handling
+// ✅ FIXED: Upload with direct GridFS approach
 router.post(
   "/upload",
   authMiddleware,
-  upload.single("file"),        // First, receive file in memory
-  uploadToGridFS,              // Second, upload to GridFS
-  resourceController.uploadResource  // Third, create resource record
+  upload.single("file"),
+  uploadToGridFS,  // This middleware uploads buffer to GridFS
+  uploadResource
 );
 
-router.post("/:id/like", authMiddleware, resourceController.toggleLike);
-router.post("/:id/bookmark", authMiddleware, resourceController.toggleBookmark);
+// Like/Bookmark routes
+router.post("/:id/like", authMiddleware, toggleLike);
+router.post("/:id/bookmark", authMiddleware, toggleBookmark);
 
 module.exports = router;

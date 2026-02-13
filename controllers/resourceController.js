@@ -1,6 +1,4 @@
-const Resource = require("../models/Resource");
-const User = require("../models/User");
-const mongoose = require("mongoose");
+// controllers/resourceController.js - uploadResource function
 
 // @desc    Upload new resource
 // @route   POST /api/resources/upload
@@ -24,15 +22,13 @@ exports.uploadResource = async (req, res) => {
       });
     }
 
-    // ✅ CRITICAL FIX: GridFS file ID is in req.file.id
-    const fileId = req.file.id;
+    // ✅ CRITICAL: File ID comes from uploadToGridFS middleware
+    const fileId = req.file.id; // This is the GridFS file _id
     if (!fileId) {
       console.error('❌ No file ID generated. File object:', {
         id: req.file.id,
         filename: req.file.filename,
-        originalname: req.file.originalname,
-        mimetype: req.file.mimetype,
-        size: req.file.size
+        originalname: req.file.originalname
       });
       
       return res.status(500).json({
@@ -41,12 +37,11 @@ exports.uploadResource = async (req, res) => {
       });
     }
 
-    console.log('✅ File uploaded to GridFS successfully:', {
+    console.log('✅ File uploaded to GridFS:', {
       fileId: fileId.toString(),
       filename: req.file.filename,
       originalname: req.file.originalname,
-      size: req.file.size,
-      sizeMB: (req.file.size / (1024 * 1024)).toFixed(2)
+      size: req.file.size
     });
 
     const fileUrl = `/api/files/${fileId}`;
@@ -60,18 +55,14 @@ exports.uploadResource = async (req, res) => {
       semester: Number(semester),
       subject,
       type,
-      fileId: fileId.toString(),
+      fileId: fileId.toString(), // Store as string for easy querying
       fileUrl: fileUrl,
       fileName: fileName,
       uploadedBy: req.user._id,
       status: "pending",
     });
 
-    console.log(`✅ Resource created successfully:`, {
-      resourceId: resource._id,
-      fileId: fileId.toString(),
-      title: resource.title
-    });
+    console.log(`✅ Resource created: ${resource._id}`);
 
     res.status(201).json({
       success: true,
@@ -80,17 +71,15 @@ exports.uploadResource = async (req, res) => {
     });
   } catch (error) {
     console.error("❌ Upload resource error:", error);
-    
-    // More detailed error response
     res.status(500).json({
       success: false,
       message: "Server error during upload",
       error: process.env.NODE_ENV === "development" ? error.message : "Internal server error",
-      details: process.env.NODE_ENV === "development" ? error.stack : undefined
     });
   }
 };
 
+// ... rest of the controller functions remain the same
 
 // @desc    Get single resource by ID
 // @route   GET /api/resources/:id
