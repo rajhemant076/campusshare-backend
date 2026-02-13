@@ -1,10 +1,12 @@
+// routes/resourceRoutes.js
+
 const express = require("express");
 const router = express.Router();
-const { upload, uploadToGridFS } = require("../middleware/gridfsUploadDirect"); // ✅ Use direct version
+const { upload, uploadToGridFS } = require("../middleware/gridfsUploadDirect");
 const authMiddleware = require("../middleware/auth");
 const {
+  getResources,           // ✅ Make sure this is included
   uploadResource,
-  getResources,
   getResourceById,
   toggleLike,
   toggleBookmark,
@@ -13,19 +15,19 @@ const {
 } = require("../controllers/resourceController");
 
 // Public routes
-router.get("/", getResources);
+router.get("/", getResources);           // This was line 16 causing the error
 router.get("/:id", getResourceById);
 
 // Protected routes
 router.get("/user/bookmarks", authMiddleware, getBookmarks);
 router.get("/user/my-uploads", authMiddleware, getMyUploads);
 
-// ✅ FIXED: Upload with direct GridFS approach
+// Upload route with direct GridFS approach
 router.post(
   "/upload",
   authMiddleware,
   upload.single("file"),
-  uploadToGridFS,  // This middleware uploads buffer to GridFS
+  uploadToGridFS,
   uploadResource
 );
 

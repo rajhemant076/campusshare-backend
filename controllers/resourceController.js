@@ -1,4 +1,75 @@
-// controllers/resourceController.js - uploadResource function
+// controllers/resourceController.js
+
+const Resource = require("../models/Resource");
+const User = require("../models/User");
+const mongoose = require("mongoose");
+
+// @desc    Get all approved resources with pagination and filters
+// @route   GET /api/resources
+// @access  Public
+exports.getResources = async (req, res) => {
+  try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 12;
+    const skip = (page - 1) * limit;
+
+    // Build filter query
+    const query = { status: "approved" };
+    
+    // Apply filters if provided
+    if (req.query.branch) {
+      query.branch = req.query.branch;
+    }
+    
+    if (req.query.semester) {
+      query.semester = parseInt(req.query.semester);
+    }
+    
+    if (req.query.subject) {
+      query.subject = { $regex: req.query.subject, $options: 'i' };
+    }
+    
+    if (req.query.type) {
+      query.type = req.query.type;
+    }
+    
+    // Search functionality
+    if (req.query.search) {
+      query.$or = [
+        { title: { $regex: req.query.search, $options: 'i' } },
+        { description: { $regex: req.query.search, $options: 'i' } },
+        { subject: { $regex: req.query.search, $options: 'i' } }
+      ];
+    }
+
+    // Get total count for pagination
+    const total = await Resource.countDocuments(query);
+    
+    // Get paginated results
+    const resources = await Resource.find(query)
+      .populate("uploadedBy", "name branch semester")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean(); // Use lean() for better performance
+
+    res.json({
+      success: true,
+      count: resources.length,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+      resources,
+    });
+  } catch (error) {
+    console.error("❌ Get resources error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error fetching resources",
+      error: process.env.NODE_ENV === "development" ? error.message : "Internal server error",
+    });
+  }
+};
 
 // @desc    Upload new resource
 // @route   POST /api/resources/upload
@@ -23,7 +94,7 @@ exports.uploadResource = async (req, res) => {
     }
 
     // ✅ CRITICAL: File ID comes from uploadToGridFS middleware
-    const fileId = req.file.id; // This is the GridFS file _id
+    const fileId = req.file.id;
     if (!fileId) {
       console.error('❌ No file ID generated. File object:', {
         id: req.file.id,
@@ -55,7 +126,7 @@ exports.uploadResource = async (req, res) => {
       semester: Number(semester),
       subject,
       type,
-      fileId: fileId.toString(), // Store as string for easy querying
+      fileId: fileId.toString(),
       fileUrl: fileUrl,
       fileName: fileName,
       uploadedBy: req.user._id,
@@ -79,17 +150,14 @@ exports.uploadResource = async (req, res) => {
   }
 };
 
-// ... rest of the controller functions remain the same
-
 // @desc    Get single resource by ID
 // @route   GET /api/resources/:id
 // @access  Public
 exports.getResourceById = async (req, res) => {
   try {
-    const resource = await Resource.findById(req.params.id).populate(
-      "uploadedBy",
-      "name branch semester"
-    );
+    const resource = await Resource.findById(req.params.id)
+      .populate("uploadedBy", "name branch semester")
+      .lean();
 
     if (!resource) {
       return res.status(404).json({
@@ -116,11 +184,11 @@ exports.getResourceById = async (req, res) => {
       resource,
     });
   } catch (error) {
-    console.error("Get resource error:", error);
+    console.error("❌ Get resource error:", error);
     res.status(500).json({
       success: false,
       message: "Server error fetching resource",
-      error: error.message,
+      error: process.env.NODE_ENV === "development" ? error.message : "Internal server error",
     });
   }
 };
@@ -172,11 +240,11 @@ exports.toggleLike = async (req, res) => {
       likesCount: resource.likesCount,
     });
   } catch (error) {
-    console.error("Toggle like error:", error);
+    console.error("❌ Toggle like error:", error);
     res.status(500).json({
       success: false,
       message: "Server error toggling like",
-      error: error.message,
+      error: process.env.NODE_ENV === "development" ? error.message : "Internal server error",
     });
   }
 };
@@ -224,11 +292,11 @@ exports.toggleBookmark = async (req, res) => {
       bookmarked: !isBookmarked,
     });
   } catch (error) {
-    console.error("Toggle bookmark error:", error);
+    console.error("❌ Toggle bookmark error:", error);
     res.status(500).json({
       success: false,
       message: "Server error toggling bookmark",
-      error: error.message,
+      error: process.env.NODE_ENV === "development" ? error.message : "Internal server error",
     });
   }
 };
@@ -265,15 +333,39 @@ exports.getBookmarks = async (req, res) => {
       bookmarks: validBookmarks,
     });
   } catch (error) {
-    console.error("Get bookmarks error:", error);
+    console.error("❌ Get bookmarks error:", error);
     res.status(500).json({
       success: false,
       message: "Server error fetching bookmarks",
-      error: error.message,
+      error: process.env.NODE_ENV === "development" ? error.message : "Internal server error",
     });
   }
 };
-// Add this function to your resourceController.js
+
+// @desc    Get user's uploaded resources
+// @route   GET /api/resources/my-uploads
+// @access  Private
+exports.getMyUploads = async (req, res) => {
+  try {
+    const resources = await Resource.find({ uploadedBy: req.user._id })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    res.json({
+      success: true,
+      count: resources.length,
+      resources,
+    });
+  } catch (error) {
+    console.error("❌ Get my uploads error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error fetching uploads",
+      error: process.env.NODE_ENV === "development" ? error.message : "Internal server error",
+    });
+  }
+};
+
 // @desc    Delete resource by ID (used by admin)
 // @access  Internal
 exports.deleteResourceById = async (resourceId) => {
@@ -283,42 +375,24 @@ exports.deleteResourceById = async (resourceId) => {
 
     // Delete from GridFS
     if (resource.fileId) {
-      const db = mongoose.connection.db;
-      const bucket = new mongoose.mongo.GridFSBucket(db, {
-        bucketName: "uploads"
-      });
-      const fileId = new mongoose.Types.ObjectId(resource.fileId);
-      await bucket.delete(fileId);
+      try {
+        const db = mongoose.connection.db;
+        const bucket = new mongoose.mongo.GridFSBucket(db, {
+          bucketName: "uploads"
+        });
+        const fileId = new mongoose.Types.ObjectId(resource.fileId);
+        await bucket.delete(fileId);
+        console.log(`✅ GridFS file deleted: ${resource.fileId}`);
+      } catch (fileError) {
+        console.error("⚠️ Error deleting GridFS file:", fileError.message);
+        // Continue even if file delete fails
+      }
     }
 
     await Resource.findByIdAndDelete(resourceId);
     return true;
   } catch (error) {
-    console.error('Error deleting resource:', error);
+    console.error('❌ Error deleting resource:', error);
     return false;
-  }
-};
-
-// @desc    Get user's uploaded resources
-// @route   GET /api/resources/my-uploads
-// @access  Private
-exports.getMyUploads = async (req, res) => {
-  try {
-    const resources = await Resource.find({ uploadedBy: req.user._id }).sort({
-      createdAt: -1,
-    });
-
-    res.json({
-      success: true,
-      count: resources.length,
-      resources,
-    });
-  } catch (error) {
-    console.error("Get my uploads error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error fetching uploads",
-      error: error.message,
-    });
   }
 };
