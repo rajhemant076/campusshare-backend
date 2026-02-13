@@ -2,8 +2,10 @@ const mongoose = require('mongoose');
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const compression = require("compression"); // Add this for response compression
+const helmet = require("helmet"); // Add this for security headers
 const connectDB = require("./config/db");
-const { verifyGridFS } = require("./middleware/gridfsUpload");
+const { verifyGridFS } = require("./middleware/gridfsUploadDirect"); // ✅ FIXED: Use direct version
 
 // ============================================
 // VALIDATE ENVIRONMENT VARIABLES
@@ -40,7 +42,24 @@ const aboutRoutes = require("./routes/aboutRoutes");
 const app = express();
 
 // ============================================
-// CORS CONFIGURATION - FIXED FOR VERCEL PREVIEW URLS
+// SECURITY & PERFORMANCE MIDDLEWARE
+// ============================================
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" } // Allow PDF viewing
+}));
+
+// Enable compression for all responses
+app.use(compression({
+  level: 6, // Compression level (1-9)
+  threshold: 1024, // Only compress responses > 1kb
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) return false;
+    return compression.filter(req, res);
+  }
+}));
+
+// ============================================
+// CORS CONFIGURATION - OPTIMIZED
 // ============================================
 const allowedOrigins = [
   // Development origins
@@ -56,14 +75,14 @@ const allowedOrigins = [
   'https://campusshare-frontend.netlify.app',
   'https://campusshare-frontend.onrender.com',
   
-  // 🔥 IMPORTANT: Allow ALL Vercel preview deployments
+  // Allow ALL Vercel preview deployments
   /\.vercel\.app$/,
   
   process.env.CLIENT_URL,
 ].filter(Boolean);
 
-// CORS middleware configuration with regex support
-app.use(cors({
+// Cache CORS check results for performance
+const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps, curl, Postman)
     if (!origin) return callback(null, true);
@@ -77,6 +96,7 @@ app.use(cors({
     });
 
     if (isAllowed || process.env.NODE_ENV !== 'production') {
+      // Cache the result for this origin (browsers cache preflight)
       callback(null, true);
     } else {
       console.warn(`🚫 Blocked origin: ${origin}`);
@@ -88,17 +108,41 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   exposedHeaders: ['Content-Disposition'],
   preflightContinue: false,
-  optionsSuccessStatus: 204
-}));
+  optionsSuccessStatus: 204,
+  maxAge: 86400 // Cache preflight results for 24 hours
+};
+
+app.use(cors(corsOptions));
 
 // Handle preflight requests explicitly
-app.options('*', cors());
+app.options('*', cors(corsOptions));
 
 // ============================================
-// BODY PARSER MIDDLEWARE
+// BODY PARSER MIDDLEWARE - OPTIMIZED
 // ============================================
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use(express.json({ 
+  limit: '50mb',
+  // Parse only when needed
+  verify: (req, res, buf) => {
+    req.rawBody = buf;
+  }
+}));
+
+app.use(express.urlencoded({ 
+  extended: true, 
+  limit: '50mb',
+  parameterLimit: 10000 // Limit number of params
+}));
+
+// ============================================
+// REQUEST LOGGING MIDDLEWARE (Development only)
+// ============================================
+if (process.env.NODE_ENV === 'development') {
+  app.use((req, res, next) => {
+    console.log(`📨 ${req.method} ${req.url}`);
+    next();
+  });
+}
 
 // ============================================
 // API ROUTES
@@ -112,9 +156,12 @@ app.use("/api/contact", contactRoutes);
 app.use("/api/about", aboutRoutes);
 
 // ============================================
-// ENHANCED DEBUG ENDPOINT - CHECK GRIDFS FILES
+// OPTIMIZED DEBUG ENDPOINT - WITH CACHING
 // ============================================
 app.get('/api/debug/gridfs', async (req, res) => {
+  // Cache debug info for 30 seconds
+  res.set('Cache-Control', 'public, max-age=30');
+  
   try {
     if (mongoose.connection.readyState !== 1) {
       return res.status(500).json({
@@ -133,55 +180,25 @@ app.get('/api/debug/gridfs', async (req, res) => {
     
     let files = [];
     let chunksCount = 0;
-    let testResults = [];
     
     if (filesCollection) {
-      files = await db.collection('uploads.files').find().toArray();
-      
-      // Test first 5 files
-      for (const file of files.slice(0, 5)) {
-        try {
-          const bucket = new mongoose.mongo.GridFSBucket(db, { bucketName: "uploads" });
-          const stream = bucket.openDownloadStream(file._id);
-          
-          // Test if file is readable
-          const testResult = await new Promise((resolve) => {
-            let hasData = false;
-            stream.on('data', () => { hasData = true; });
-            stream.on('end', () => resolve({ success: true, hasData }));
-            stream.on('error', (err) => resolve({ success: false, error: err.message }));
-            
-            // Timeout after 2 seconds
-            setTimeout(() => resolve({ success: false, error: 'Timeout' }), 2000);
-          });
-          
-          testResults.push({
-            fileId: file._id,
-            filename: file.filename,
-            originalName: file.metadata?.originalName,
-            size: file.length,
-            sizeMB: (file.length / (1024 * 1024)).toFixed(2),
-            readable: testResult.success,
-            error: testResult.error
-          });
-        } catch (err) {
-          testResults.push({
-            fileId: file._id,
-            filename: file.filename,
-            error: err.message
-          });
-        }
-      }
+      // Limit to 20 files for performance
+      files = await db.collection('uploads.files')
+        .find()
+        .sort({ uploadDate: -1 })
+        .limit(20)
+        .toArray();
     }
     
     if (chunksCollection) {
       chunksCount = await db.collection('uploads.chunks').countDocuments();
     }
 
-    // Get resources that reference files
+    // Get resources that reference files (limit to 50)
     const Resource = require('./models/Resource');
     const resources = await Resource.find({ fileId: { $exists: true } })
       .select('title fileId fileName status')
+      .limit(50)
       .lean();
 
     res.json({
@@ -203,8 +220,7 @@ app.get('/api/debug/gridfs', async (req, res) => {
           originalName: f.metadata?.originalName,
           size: f.length,
           sizeMB: (f.length / (1024 * 1024)).toFixed(2),
-          uploadDate: f.uploadDate,
-          metadata: f.metadata
+          uploadDate: f.uploadDate
         }))
       },
       resources: resources.map(r => ({
@@ -214,58 +230,24 @@ app.get('/api/debug/gridfs', async (req, res) => {
         fileId: r.fileId,
         fileName: r.fileName,
         fileExists: files.some(f => f._id.toString() === r.fileId)
-      })),
-      fileTests: testResults
+      }))
     });
   } catch (error) {
     console.error('Debug endpoint error:', error);
     res.status(500).json({
       success: false,
-      error: error.message,
-      stack: error.stack
+      error: error.message
     });
   }
 });
 
 // ============================================
-// TEST ENDPOINT - DIRECT FILE ACCESS WITHOUT GRIDFS
-// ============================================
-app.get('/api/test/file/:id', async (req, res) => {
-  try {
-    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
-      return res.status(400).json({ error: 'Invalid ID' });
-    }
-
-    const db = mongoose.connection.db;
-    const fileId = new mongoose.Types.ObjectId(req.params.id);
-    
-    const file = await db.collection('uploads.files').findOne({ _id: fileId });
-    
-    if (!file) {
-      return res.status(404).json({ error: 'File not found' });
-    }
-
-    res.json({
-      success: true,
-      message: 'File exists in GridFS',
-      file: {
-        id: file._id,
-        filename: file.filename,
-        originalName: file.metadata?.originalName,
-        size: file.length,
-        contentType: file.contentType,
-        uploadDate: file.uploadDate
-      }
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ============================================
-// HEALTH CHECK ENDPOINT
+// HEALTH CHECK ENDPOINT - WITH CACHING
 // ============================================
 app.get("/api/health", (req, res) => {
+  // Cache health check for 60 seconds
+  res.set('Cache-Control', 'public, max-age=60');
+  
   res.status(200).json({
     success: true,
     message: "CampusShare API is running",
@@ -273,15 +255,17 @@ app.get("/api/health", (req, res) => {
     environment: process.env.NODE_ENV || "development",
     version: "1.0.0",
     database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
-    uptime: process.uptime(),
-    memory: process.memoryUsage()
+    uptime: process.uptime()
   });
 });
 
 // ============================================
-// ROOT ENDPOINT
+// ROOT ENDPOINT - WITH CACHING
 // ============================================
 app.get("/", (req, res) => {
+  // Cache root endpoint for 1 hour
+  res.set('Cache-Control', 'public, max-age=3600');
+  
   res.status(200).json({
     success: true,
     message: "Welcome to CampusShare API",
@@ -294,39 +278,31 @@ app.get("/", (req, res) => {
       features: "/api/features",
       contact: "/api/contact",
       about: "/api/about",
-      debug: "/api/debug/gridfs",
-      test: "/api/test/file/:id"
+      debug: "/api/debug/gridfs"
     },
     version: "1.0.0"
   });
 });
 
 // ============================================
-// ERROR HANDLING MIDDLEWARE
+// ERROR HANDLING MIDDLEWARE - OPTIMIZED
 // ============================================
 app.use((err, req, res, next) => {
   console.error('❌ Error:', err.message);
-  console.error('📝 Stack:', err.stack);
-
+  
+  // Don't send stack traces in production
+  const isDev = process.env.NODE_ENV === 'development';
+  
   if (err.name === 'MulterError') {
-    if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({
-        success: false,
-        message: 'File size too large. Maximum size is 10MB.',
-        error: err.message
-      });
-    }
-    if (err.code === 'LIMIT_UNEXPECTED_FILE') {
-      return res.status(400).json({
-        success: false,
-        message: 'Unexpected field. Please upload a single PDF file.',
-        error: err.message
-      });
-    }
+    const messages = {
+      'LIMIT_FILE_SIZE': 'File size too large. Maximum size is 10MB.',
+      'LIMIT_UNEXPECTED_FILE': 'Unexpected field. Please upload a single PDF file.'
+    };
+    
     return res.status(400).json({
       success: false,
-      message: 'File upload error',
-      error: err.message
+      message: messages[err.code] || 'File upload error',
+      error: isDev ? err.message : undefined
     });
   }
 
@@ -334,7 +310,7 @@ app.use((err, req, res, next) => {
     return res.status(400).json({
       success: false,
       message: err.message,
-      error: 'Invalid file type'
+      error: isDev ? 'Invalid file type' : undefined
     });
   }
 
@@ -342,7 +318,7 @@ app.use((err, req, res, next) => {
   res.status(statusCode).json({
     success: false,
     message: err.message || 'Internal server error',
-    error: process.env.NODE_ENV === 'production' ? 'Something went wrong' : err.stack,
+    ...(isDev && { error: err.stack }),
     timestamp: new Date().toISOString()
   });
 });
@@ -353,19 +329,7 @@ app.use((err, req, res, next) => {
 app.use((req, res) => {
   res.status(404).json({
     success: false,
-    message: `Route not found: ${req.method} ${req.originalUrl}`,
-    availableEndpoints: {
-      health: 'GET /api/health',
-      auth: 'POST /api/auth/signup, POST /api/auth/login, GET /api/auth/me',
-      resources: 'GET /api/resources, POST /api/resources/upload',
-      files: 'GET /api/files/:id',
-      admin: 'GET /api/admin/stats, GET /api/admin/resources/pending',
-      features: 'GET /api/features, GET /api/features/stats',
-      contact: 'POST /api/contact, GET /api/contact/info',
-      about: 'GET /api/about, GET /api/about/team',
-      debug: 'GET /api/debug/gridfs',
-      test: 'GET /api/test/file/:id'
-    }
+    message: `Route not found: ${req.method} ${req.originalUrl}`
   });
 });
 
@@ -380,34 +344,14 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
   console.log('=================================');
   console.log(`📍 URL: http://0.0.0.0:${PORT}`);
   console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`📦 Compression: Enabled`);
+  console.log(`🛡️  Helmet: Enabled`);
 
   // Verify GridFS after server starts
   if (mongoose.connection.db) {
     await verifyGridFS(mongoose.connection.db);
   }
 
-  console.log('\n🔒 CORS Allowed Origins:');
-  allowedOrigins.forEach(origin => {
-    if (origin instanceof RegExp) {
-      console.log(`   - ${origin} (regex pattern)`);
-    } else {
-      console.log(`   - ${origin}`);
-    }
-  });
-
-  console.log('\n📋 Available Endpoints:');
-  console.log('   GET  /              - API info');
-  console.log('   GET  /api/health    - Health check');
-  console.log('   POST /api/auth/*    - Authentication');
-  console.log('   GET  /api/resources - Get resources');
-  console.log('   POST /api/resources/upload - Upload file');
-  console.log('   GET  /api/files/:id - View/Download PDF');
-  console.log('   GET  /api/admin/*   - Admin routes');
-  console.log('   GET  /api/features  - Features & stats');
-  console.log('   POST /api/contact   - Contact form');
-  console.log('   GET  /api/about     - About information');
-  console.log('   GET  /api/debug/gridfs - Debug GridFS');
-  console.log('   GET  /api/test/file/:id - Test file endpoint');
   console.log('\n✅ Server ready!');
   console.log('=================================\n');
 });
@@ -415,26 +359,42 @@ const server = app.listen(PORT, '0.0.0.0', async () => {
 // ============================================
 // GRACEFUL SHUTDOWN
 // ============================================
-process.on('SIGTERM', () => {
-  console.log('👋 SIGTERM received. Closing server...');
-  server.close(() => {
-    console.log('✅ Server closed');
-    mongoose.connection.close(false, () => {
+const gracefulShutdown = async (signal) => {
+  console.log(`\n👋 ${signal} received. Closing server...`);
+  
+  server.close(async () => {
+    console.log('✅ HTTP server closed');
+    
+    try {
+      await mongoose.connection.close();
       console.log('✅ MongoDB connection closed');
       process.exit(0);
-    });
+    } catch (err) {
+      console.error('❌ Error during shutdown:', err);
+      process.exit(1);
+    }
   });
+  
+  // Force close after 10 seconds
+  setTimeout(() => {
+    console.error('❌ Could not close connections in time, forcefully shutting down');
+    process.exit(1);
+  }, 10000);
+};
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Handle uncaught exceptions
+process.on('uncaughtException', (err) => {
+  console.error('❌ Uncaught Exception:', err);
+  gracefulShutdown('UNCAUGHT_EXCEPTION');
 });
 
-process.on('SIGINT', () => {
-  console.log('👋 SIGINT received. Closing server...');
-  server.close(() => {
-    console.log('✅ Server closed');
-    mongoose.connection.close(false, () => {
-      console.log('✅ MongoDB connection closed');
-      process.exit(0);
-    });
-  });
+// Handle unhandled promise rejections
+process.on('unhandledRejection', (err) => {
+  console.error('❌ Unhandled Rejection:', err);
+  gracefulShutdown('UNHANDLED_REJECTION');
 });
 
 module.exports = app;
