@@ -1,5 +1,6 @@
 const Resource = require("../models/Resource");
 const User = require("../models/User");
+const mongoose = require("mongoose");
 
 // @desc    Upload new resource
 // @route   POST /api/resources/upload
@@ -23,22 +24,33 @@ exports.uploadResource = async (req, res) => {
       });
     }
 
-    // ✅ FIXED: GridFS file details for direct upload approach
-    const fileId = req.file.id || req.file.gfsId;  // Handle both naming conventions
+    // ✅ CRITICAL FIX: GridFS file ID is in req.file.id
+    const fileId = req.file.id;
     if (!fileId) {
+      console.error('❌ No file ID generated. File object:', {
+        id: req.file.id,
+        filename: req.file.filename,
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size
+      });
+      
       return res.status(500).json({
         success: false,
-        message: "File upload failed - no file ID generated",
+        message: "File upload failed - no file ID generated. Please try again.",
       });
     }
 
+    console.log('✅ File uploaded to GridFS successfully:', {
+      fileId: fileId.toString(),
+      filename: req.file.filename,
+      originalname: req.file.originalname,
+      size: req.file.size,
+      sizeMB: (req.file.size / (1024 * 1024)).toFixed(2)
+    });
+
     const fileUrl = `/api/files/${fileId}`;
-    
-    // ✅ FIXED: Get filename from multiple possible sources
-    const fileName = req.file.originalname || 
-                    (req.file.metadata && req.file.metadata.originalName) || 
-                    req.file.filename || 
-                    "document.pdf";
+    const fileName = req.file.originalname;
 
     // Create resource
     const resource = await Resource.create({
@@ -48,17 +60,18 @@ exports.uploadResource = async (req, res) => {
       semester: Number(semester),
       subject,
       type,
-
-      // ✅ GridFS fields
       fileId: fileId.toString(),
       fileUrl: fileUrl,
       fileName: fileName,
-
       uploadedBy: req.user._id,
       status: "pending",
     });
 
-    console.log(`✅ Resource created: ${resource._id} with file: ${fileId}`);
+    console.log(`✅ Resource created successfully:`, {
+      resourceId: resource._id,
+      fileId: fileId.toString(),
+      title: resource.title
+    });
 
     res.status(201).json({
       success: true,
@@ -66,57 +79,18 @@ exports.uploadResource = async (req, res) => {
       resource,
     });
   } catch (error) {
-    console.error("Upload resource error:", error);
-
+    console.error("❌ Upload resource error:", error);
+    
+    // More detailed error response
     res.status(500).json({
       success: false,
       message: "Server error during upload",
       error: process.env.NODE_ENV === "development" ? error.message : "Internal server error",
+      details: process.env.NODE_ENV === "development" ? error.stack : undefined
     });
   }
 };
 
-// @desc    Get all approved resources with filters
-// @route   GET /api/resources
-// @access  Public
-exports.getResources = async (req, res) => {
-  try {
-    const { branch, semester, subject, type, search } = req.query;
-
-    let query = { status: "approved" };
-
-    // Apply filters
-    if (branch) query.branch = branch;
-    if (semester) query.semester = Number(semester);
-    if (subject) query.subject = subject;
-    if (type) query.type = type;
-
-    // Text search
-    if (search) {
-      query.$or = [
-        { title: { $regex: search, $options: "i" } },
-        { description: { $regex: search, $options: "i" } },
-      ];
-    }
-
-    const resources = await Resource.find(query)
-      .populate("uploadedBy", "name branch semester")
-      .sort({ createdAt: -1 });
-
-    res.json({
-      success: true,
-      count: resources.length,
-      resources,
-    });
-  } catch (error) {
-    console.error("Get resources error:", error);
-    res.status(500).json({
-      success: false,
-      message: "Server error fetching resources",
-      error: error.message,
-    });
-  }
-};
 
 // @desc    Get single resource by ID
 // @route   GET /api/resources/:id

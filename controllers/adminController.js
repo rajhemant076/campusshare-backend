@@ -189,6 +189,9 @@ exports.rejectResource = async (req, res) => {
 // @desc    Delete resource (and file from GridFS)
 // @route   DELETE /api/admin/resources/:id
 // @access  Private/Admin
+// @desc    Delete resource (and file from GridFS) - FIXED VERSION
+// @route   DELETE /api/admin/resources/:id
+// @access  Private/Admin
 exports.deleteResource = async (req, res) => {
   try {
     const resource = await Resource.findById(req.params.id);
@@ -200,7 +203,7 @@ exports.deleteResource = async (req, res) => {
       });
     }
 
-    // ✅ FIXED: Delete file from GridFS
+    // ✅ FIXED: Delete file from GridFS with proper error handling
     if (resource.fileId) {
       try {
         const db = mongoose.connection.db;
@@ -212,7 +215,7 @@ exports.deleteResource = async (req, res) => {
         await bucket.delete(fileId);
         console.log(`✅ GridFS file deleted: ${resource.fileId}`);
       } catch (fileError) {
-        console.error("Error deleting GridFS file:", fileError);
+        console.error("⚠️ Error deleting GridFS file (continuing with resource deletion):", fileError.message);
         // Continue with resource deletion even if file delete fails
       }
     }

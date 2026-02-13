@@ -3,6 +3,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const connectDB = require("./config/db");
+const { verifyGridFS } = require("./middleware/gridfsUpload");
 
 // ============================================
 // VALIDATE ENVIRONMENT VARIABLES
@@ -55,7 +56,7 @@ const allowedOrigins = [
   'https://campusshare-frontend.netlify.app',
   'https://campusshare-frontend.onrender.com',
   
-  // 🔥 IMPORTANT: Allow ALL Vercel preview deployments (regex pattern)
+  // 🔥 IMPORTANT: Allow ALL Vercel preview deployments
   /\.vercel\.app$/,
   
   process.env.CLIENT_URL,
@@ -111,9 +112,9 @@ app.use("/api/contact", contactRoutes);
 app.use("/api/about", aboutRoutes);
 
 // ============================================
-// DEBUG ENDPOINT - CHECK GRIDFS FILES
+// ENHANCED DEBUG ENDPOINT - CHECK GRIDFS FILES
 // ============================================
-app.get('/api/debug/files', async (req, res) => {
+app.get('/api/debug/gridfs', async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) {
       return res.status(500).json({
@@ -125,40 +126,81 @@ app.get('/api/debug/files', async (req, res) => {
 
     const db = mongoose.connection.db;
     const collections = await db.listCollections().toArray();
-    const uploadsFilesExists = collections.some(c => c.name === 'uploads.files');
-    const uploadsChunksExists = collections.some(c => c.name === 'uploads.chunks');
-
+    
+    // Check GridFS collections
+    const filesCollection = collections.find(c => c.name === 'uploads.files');
+    const chunksCollection = collections.find(c => c.name === 'uploads.chunks');
+    
     let files = [];
     let chunksCount = 0;
+    let testResults = [];
     
-    if (uploadsFilesExists) {
+    if (filesCollection) {
       files = await db.collection('uploads.files').find().toArray();
+      
+      // Test first 5 files
+      for (const file of files.slice(0, 5)) {
+        try {
+          const bucket = new mongoose.mongo.GridFSBucket(db, { bucketName: "uploads" });
+          const stream = bucket.openDownloadStream(file._id);
+          
+          // Test if file is readable
+          const testResult = await new Promise((resolve) => {
+            let hasData = false;
+            stream.on('data', () => { hasData = true; });
+            stream.on('end', () => resolve({ success: true, hasData }));
+            stream.on('error', (err) => resolve({ success: false, error: err.message }));
+            
+            // Timeout after 2 seconds
+            setTimeout(() => resolve({ success: false, error: 'Timeout' }), 2000);
+          });
+          
+          testResults.push({
+            fileId: file._id,
+            filename: file.filename,
+            originalName: file.metadata?.originalName,
+            size: file.length,
+            sizeMB: (file.length / (1024 * 1024)).toFixed(2),
+            readable: testResult.success,
+            error: testResult.error
+          });
+        } catch (err) {
+          testResults.push({
+            fileId: file._id,
+            filename: file.filename,
+            error: err.message
+          });
+        }
+      }
     }
     
-    if (uploadsChunksExists) {
+    if (chunksCollection) {
       chunksCount = await db.collection('uploads.chunks').countDocuments();
     }
 
+    // Get resources that reference files
     const Resource = require('./models/Resource');
     const resources = await Resource.find({ fileId: { $exists: true } })
-      .select('title fileId fileName fileUrl')
+      .select('title fileId fileName status')
       .lean();
 
     res.json({
       success: true,
+      timestamp: new Date().toISOString(),
       database: {
         name: db.databaseName,
         connectionState: mongoose.connection.readyState,
         collections: collections.map(c => c.name)
       },
       gridfs: {
-        filesExists: uploadsFilesExists,
-        chunksExists: uploadsChunksExists,
+        filesExists: !!filesCollection,
+        chunksExists: !!chunksCollection,
         filesCount: files.length,
         chunksCount: chunksCount,
         files: files.map(f => ({
           id: f._id,
           filename: f.filename,
+          originalName: f.metadata?.originalName,
           size: f.length,
           sizeMB: (f.length / (1024 * 1024)).toFixed(2),
           uploadDate: f.uploadDate,
@@ -168,10 +210,12 @@ app.get('/api/debug/files', async (req, res) => {
       resources: resources.map(r => ({
         id: r._id,
         title: r.title,
+        status: r.status,
         fileId: r.fileId,
         fileName: r.fileName,
-        fileUrl: r.fileUrl
-      }))
+        fileExists: files.some(f => f._id.toString() === r.fileId)
+      })),
+      fileTests: testResults
     });
   } catch (error) {
     console.error('Debug endpoint error:', error);
@@ -207,6 +251,7 @@ app.get('/api/test/file/:id', async (req, res) => {
       file: {
         id: file._id,
         filename: file.filename,
+        originalName: file.metadata?.originalName,
         size: file.length,
         contentType: file.contentType,
         uploadDate: file.uploadDate
@@ -249,7 +294,7 @@ app.get("/", (req, res) => {
       features: "/api/features",
       contact: "/api/contact",
       about: "/api/about",
-      debug: "/api/debug/files",
+      debug: "/api/debug/gridfs",
       test: "/api/test/file/:id"
     },
     version: "1.0.0"
@@ -293,49 +338,6 @@ app.use((err, req, res, next) => {
     });
   }
 
-  if (err.name === 'JsonWebTokenError') {
-    return res.status(401).json({
-      success: false,
-      message: 'Invalid token. Please login again.',
-      error: err.message
-    });
-  }
-
-  if (err.name === 'TokenExpiredError') {
-    return res.status(401).json({
-      success: false,
-      message: 'Token expired. Please login again.',
-      error: err.message
-    });
-  }
-
-  if (err.name === 'MongoError' || err.name === 'MongoServerError') {
-    if (err.code === 11000) {
-      return res.status(400).json({
-        success: false,
-        message: 'Duplicate entry. This record already exists.',
-        error: err.message
-      });
-    }
-  }
-
-  if (err.name === 'ValidationError') {
-    const errors = Object.values(err.errors).map(e => e.message);
-    return res.status(400).json({
-      success: false,
-      message: 'Validation error',
-      errors
-    });
-  }
-
-  if (err.name === 'CastError') {
-    return res.status(400).json({
-      success: false,
-      message: 'Invalid ID format',
-      error: err.message
-    });
-  }
-
   const statusCode = err.status || 500;
   res.status(statusCode).json({
     success: false,
@@ -361,7 +363,7 @@ app.use((req, res) => {
       features: 'GET /api/features, GET /api/features/stats',
       contact: 'POST /api/contact, GET /api/contact/info',
       about: 'GET /api/about, GET /api/about/team',
-      debug: 'GET /api/debug/files',
+      debug: 'GET /api/debug/gridfs',
       test: 'GET /api/test/file/:id'
     }
   });
@@ -370,14 +372,19 @@ app.use((req, res) => {
 // ============================================
 // START SERVER
 // ============================================
-const PORT = process.env.PORT || 10000; // Changed to Render's default port
+const PORT = process.env.PORT || 10000;
 
-const server = app.listen(PORT, '0.0.0.0', () => { // Bind to 0.0.0.0 for Render
+const server = app.listen(PORT, '0.0.0.0', async () => {
   console.log('\n=================================');
   console.log('🚀 CampusShare API Server');
   console.log('=================================');
   console.log(`📍 URL: http://0.0.0.0:${PORT}`);
   console.log(`🔧 Environment: ${process.env.NODE_ENV || 'development'}`);
+
+  // Verify GridFS after server starts
+  if (mongoose.connection.db) {
+    await verifyGridFS(mongoose.connection.db);
+  }
 
   console.log('\n🔒 CORS Allowed Origins:');
   allowedOrigins.forEach(origin => {
@@ -399,7 +406,7 @@ const server = app.listen(PORT, '0.0.0.0', () => { // Bind to 0.0.0.0 for Render
   console.log('   GET  /api/features  - Features & stats');
   console.log('   POST /api/contact   - Contact form');
   console.log('   GET  /api/about     - About information');
-  console.log('   GET  /api/debug/files - Debug GridFS');
+  console.log('   GET  /api/debug/gridfs - Debug GridFS');
   console.log('   GET  /api/test/file/:id - Test file endpoint');
   console.log('\n✅ Server ready!');
   console.log('=================================\n');
